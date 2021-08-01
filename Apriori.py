@@ -179,7 +179,6 @@ def apriori(data_path,minsup=0.5,minconf=0.7):
                                 else:
                                     print(n,"(",ant[l][n],")","-->",r,"(",ant[len(r)][r],")", " confidence = ",(ant[len(j)][j]/ant[l][n]))
  
-    print("Total rules generated :",c)
    
 if __name__ == "__main__":
     inputFile='groceries.csv'
