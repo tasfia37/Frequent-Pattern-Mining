@@ -183,7 +183,7 @@ def apriori(data_path,minsup=0.5,minconf=0.7):
    
 if __name__ == "__main__":
     inputFile='groceries.csv'
-    minSup=0.05
+    minSup=0.06
     minConf=0.5
     apriori(inputFile, minSup, minConf)
   

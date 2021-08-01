@@ -1,243 +1,193 @@
-import csv
-import pandas as pd
-from itertools import combinations
-from optparse import OptionParser
+import os
 import time
 
-def fpgrowth(data_path,minsup,minconf):
-    
-    data = pd.read_csv(data_path)
-    minsup=minsup*len(data)
+class treeNode:
+    def __init__(self, name1, count2, parentNode):
+        self.name = name1
+        self.count1 = count2
+        self.Link = None
+        self.parent = parentNode
+        self.children = {}
 
-    #Add all data in a list of lists
-    items = []  
-    for i in range(0, len(data)):  
-        items.append([str(data.values[i,j]) for j in range(0, len(data.values[0]))])
-    print("Total transactions: ",len(items))
-    
-    #Creating a list of dictionaries
-    count = [dict() for x in range(len(data.values[0])+1)]
 
-    #Count support for each individual items
-    s=[]
-    for i in items:
-        for j in i:
-            s.append(j)
-    for i in s:
-        #If item is present in dictionary, increment its count by 1
-        if i in count[1]:
-            count[1][i] = count[1][i] + 1
-        #If item is not present in dictionary, set its count to 1
+    def __lt__(self, other):
+        in1 = self.count1
+        in2 = other.count1
+        if in1 < in2:
+            return True
         else:
-            count[1][i] = 1
+            return False
 
-    #Remove infrequent and empty items
-    for i in count[1].copy():
-        if(count[1][i]<minsup):
-            count[1].pop(i)
-    #count[1].pop('nan')
+    def inc(self, count2):
+        self.count1 += count2
 
-    #Storing transactions as lists without infrequent items
-    a=list(count[1])
-    item=[list() for i in range(len(data))]
-    c=0
-    for i in range(0,len(items)):
-        for j in range(len(items[i])):
-            if(a.__contains__(items[i][j])!=0):
-                item[i].append(items[i][j])
+def create_headertable(dataSet):
+    headertable = {}
+    for trans in dataSet:
+        for item in trans:
+            if item!='':
+                headertable[item] = headertable.get(item, 0) + dataSet[trans]
+    return headertable
 
-    #Function to sort list to support
-    def sort(a):
-        for i in range(len(a)-1):
-            for j in range(len(a)-i-1):
-                if(count[1][a[j]]<count[1][a[j+1]]):
-                    a[j],a[j+1]=a[j+1],a[j]
-            
-    #Call function to sort all transactions in descending order of their support
-    for i in range(0,len(data)):
-        if(len(item[i])>1):
-            sort(item[i])
+def prune_step(headertable,minSup,cnt3):
+    for k in headertable.copy().keys():
+        if headertable[k] < minSup*cnt3:
+            del (headertable[k])
+    return headertable
 
-    #Tree class for FP-Tree
-    class tree:
-        def __init__(self, name, sup, parent):
-            self.name = name
-            self.sup = sup
-            self.nodeLink = None
-            self.parent = parent
-            self.children = []
+def sort_update(headertable,dataSet,freqItemSet):
 
-    #Function to check if the node is present is a child of the current node
-    def ispresent(node,name):
-        f=-1
-        for i in node.children:
-            f=f+1
-            if(i.name==name):
-                return f
-        return -1
+    retTree = treeNode('Null Set', 1, None)
+    for tranSet, count1 in dataSet.items():
+        localID = {}
+        for item in tranSet:
+            if item in freqItemSet:
+                localID[item] = headertable[item][0]
+        if len(localID) > 0:
+            orderedItems = [v[0] for v in sorted(localID.items(),key=lambda p: p, reverse=True)]
+            updateTree(orderedItems, retTree, headertable, count1)
 
-    #HeaderTable which stores the reference of last/first occurence of an item. Used as a linked list to generate candidate trees 
-    lastocc=count[1].copy()
-    for i in lastocc:
-        lastocc[i]=None
+    return headertable,freqItemSet,retTree
 
-    #Function to create FP-tree
-    root = tree("root",-1,None)
-    z=0
-    for i in item:
-        current=root
-        for j in range(len(i)):
-            if(ispresent(current,i[j])>=0):
-                current=current.children[ispresent(current,i[j])]
-                current.sup=current.sup+1
-            else:
-                child=tree(i[j],1,current)
-                current.children.append(child)
-                t=current
-                current=current.children[ispresent(current,i[j])]
-                current.parent=t
-                if(lastocc[current.name]==None):
-                    lastocc[current.name]=current
-                else:
-                    current.nodeLink=lastocc[current.name]
-                    lastocc[current.name]=current
+def createTree(dataSet, minSup,cnt3):
+    headertable=create_headertable(dataSet)
+    headertable=prune_step(headertable, minSup, cnt3)
+    freqItemSet = set(headertable.keys())
+    # if no items meet minsup then return None
+    if len(freqItemSet) == 0:
+        return None, None
+    for k in headertable:
+        headertable[k] = [headertable[k], None]
+    #Sort and update tree if there are new freqitemsets found
+    headertable, freqItemSet, retTree=sort_update(headertable,dataSet,freqItemSet)
+    return retTree, headertable
 
-    #Function to extract single item set from a tuple
-    def value(a):
-        a=str(a)
-        a=a[:-2]
-        a=a[2:]
-        a=a[:-1]
-        return a
 
-    #Function to get frequent itemsets with suffix 'node' and length n
-    def singlepath(node,n):
-        c=0
-        sup=node.sup
-        path=[]
-        pathname=[]
-        current=node
-        
-        #Get the path from current node to root
-        while(current.parent!=None):
-            path.append(current)
-            pathname.append(current.name)
-            current=current.parent  
-        path.remove(node)
-        pathname.remove(node.name)
-        candidatepath=[]
-        temp_candidatepath=[]
-        #Generate combinations of length n in the path
-        a =(list(combinations(pathname,n)))
-        for j in a:
-            temp_candidatepath.append(tuple(sorted(j)))
-        #Append the suffix 'node.name' to the above paths
-        for j in temp_candidatepath:
-            j=list(j)
-            j.append(node.name)
-            candidatepath.append(sorted(j))
-        #Update counts of the generated itemsets
-        for j in candidatepath:
-            j=tuple(j)
-            if j in count[n+1]:
-                count[n+1][j]=count[n+1][j]+sup
-            else:
-                count[n+1][j]=sup
-                
-        #Iterating in the candidate tree recursively 
-        if(node.nodeLink!=None):
-            node=node.nodeLink
-            singlepath(node,i)
-        
-    #Check if itemset is frequent
-    def frequent(n):
-        f=0
-        for i in count[n]:
-            if(count[n][i]>=minsup):
-                f=1
-        if(f==1):
-            return 1
-        else:
-            return 0
+def updateHeader(nodeToTest, targetNode):
+    while (nodeToTest.Link != None):
+        nodeToTest = nodeToTest.Link
+    nodeToTest.Link = targetNode
+def set_header(headertable,inTree,items):
+    if headertable[items[0]][1] == None:
+        headertable[items[0]][1] = inTree.children[items[0]]
+    else:
+        updateHeader(headertable[items[0]][1], inTree.children[items[0]])
+    return headertable,inTree
 
-    #Call singlepath function for all frequent nodes
-    for i in range(1,len(data.values[0])+1): 
-        if(frequent(i)==1):
-            for j in lastocc:
-                singlepath(lastocc[j],i)
 
-    #Remove infrequent itemsets
-    for z in range(len(data.values[0])+1):            
-        for i in count[z].copy():
-                if(count[z][i]<minsup):
-                    count[z].pop(i)
+def updateTree(items, inTree, headertable, count1):
+    if items[0] in inTree.children:
+        inTree.children[items[0]].inc(count1)
+    else:
+        inTree.children[items[0]] = treeNode(items[0], count1, inTree)
+        headertable,inTree=set_header(headertable,inTree,items)
+    if len(items) > 1:
+        updateTree(items[1:], inTree.children[items[0]], headertable, count1)
 
-    #Get 'q', the length of the longest itemset
-    i=2
-    while(len(count[i-1])!=0):
-        i=i+1
-    q=i-2
+def read_data(file_name):
+    data = []
+    a = 0
+    if not os.path.isfile(file_name):
+        print("Not found")
+        return None
+    cnnt=0
+    with open(file_name, 'r') as file:
+        for line in file:
+            z = []
+            for x in line.split(' '):
+                if x!='\n':
+                    z.append(x)
+                    cnnt+=1
+            data.append(z)
+            a = a + 1
+    #print(data)
+    print("numb of trans", a)
+    print("total items: ",cnnt)
+    return data,a
 
-    #Find maximal and closed itemsets
-    maximal=[]
-    closed=[]
-    for i in range(1,q):
-        for j in count[i]:
-            fm=0
-            fc=0
-            for k in count[i+1]:
-                a=set(list([j]))
-                b=set(list(k))
-                #Set is maximal if no immediate superset is frequent
-                if(a.intersection(b)==a):
-                    fm=1
-                    #Set is closed if none of its immediate supersets have equal support
-                    if(count[i][j]==count[i+1][k]):
-                        fc=1
-            if(fm==0):
-                maximal.append(j)
-            if(fc==0):
-                closed.append(j)
-    #All sets at the top of the tree are automatically maximal and closed
-    for i in count[q]:
-        maximal.append(i)
-        closed.append(i)
-        
-    #Find Association Rules 
-    print("ASSOCIATION RULES")
-    ant=count.copy()
-    c=0
-    
-    for i in range(q,0,-1):
-        for j in ant[i]:
-            for k in range(i-1,0,-1):
-                s=list(combinations(list(j),k))     
-                #Traverse through list of all combinations of antecedants
-                for n in s:
-                    #Sorting to prevent duplicate itemsets 
-                    r=tuple(sorted(set(j).difference(set(n))))
-                    l=len(n)
-                    #Check if len(n)==1 to be able to extract key to search in the support dictionary. 
-                    if(l==1):
-                        n=value(n)
-                        l=1
-                    if(len(r)==1):
-                        r2=value(r)
-                    if(n!=None):
-                        #If rule's confidence is greater than minconfidence, then print the rule
-                        if((ant[len(j)][j]/ant[l][n])>=minconf):
-                            #Rule is only significant if it is present in CLOSED, otherwise it is redundant
-                            if(closed.__contains__((n))):
-                                c=c+1
-                                if(len(r)==1):
-                                    print(n,"(",ant[l][n],")","--->",r2,"(",ant[len(r)][r2],")", " - conf(",(ant[len(j)][j]/ant[l][n]),")")
-                                else:
-                                    print(n,"(",ant[l][n],")","--->",r,"(",ant[len(r)][r],")", " conf(",(ant[len(j)][j]/ant[l][n]),")")
-        
-    print("Total rules generated :",c)
-if __name__ == "__main__":
-    inputFile='mushroom.csv'
-    minSup=0.7
-    minConf=0.5
-    fpgrowth(inputFile, minSup, minConf)
-   
+
+def loadSimpDat(az):
+    if az==1:
+        simpDat,cnt3 = read_data("mushroom.dat")
+        return simpDat,cnt3
+    if az == 2:
+        simpDat,cnt3 = read_data("groceries.csv")
+        return simpDat,cnt3
+
+def ascendTree(leafNode, prefixPath):
+    if leafNode.parent != None:
+        prefixPath.append(leafNode.name)
+        ascendTree(leafNode.parent, prefixPath)
+
+
+def cal_path(prefixPath,condPats,treeNode):
+    if len(prefixPath) > 1:
+        condPats[frozenset(prefixPath[1:])] = treeNode.count1
+    treeNode = treeNode.Link
+    return condPats,treeNode
+
+
+def findPrefixPath(basePat, treeNode):
+    condPats = {}
+    while treeNode != None:
+        prefixPath = []
+        ascendTree(treeNode, prefixPath)
+        condPats, treeNode=cal_path(prefixPath,condPats,treeNode)
+    return condPats
+
+
+def mineTree(inTree, headertable, minSup, preFix, freqItemList,cnt3):
+    bigL = [v[0] for v in sorted(headertable.items(),key=lambda p: p)]
+    for basePat in bigL:
+        newFreqSet = preFix.copy()
+        newFreqSet.add(basePat)
+        freqItemList.append(newFreqSet)
+        condPattBases = findPrefixPath(basePat, headertable[basePat][1])
+        myCondTree, myHead = createTree(condPattBases, minSup,cnt3)
+        #print(myHead)
+        if myHead :
+            mineTree(myCondTree, myHead, minSup, newFreqSet, freqItemList,cnt3)
+
+
+
+print("Enter 1 for dataset mushroom ")
+print("Enter 2 for dataset  groceries ")
+
+choice = int(input())
+print("Enter minimum support value betweeen 0 to 1: ")
+minSupp = input()
+minSupp = float(minSupp)
+simpleDat,cnt3 = loadSimpDat(choice)
+#print(simpleDat)
+print(minSupp,"  ",cnt3)
+#simpleDat.pop('\n')
+retDict = {}
+for trans in simpleDat:
+    retDict[frozenset(trans)] = 1
+import time
+
+# print(initSet)
+start_time=time.time()
+myFPtree, myHeaderTab = createTree(retDict,minSupp,cnt3)
+freqItems = []
+if myFPtree is not None:
+    mineTree(myFPtree, myHeaderTab, minSupp, set(), freqItems,cnt3)
+end_time=time.time()
+print(freqItems)
+print("Number of freq patterns generated: ",len(freqItems))
+
+max_len=0
+for x in freqItems:
+    if len(x)>max_len:
+        max_len=len(x)
+
+
+counttt=0
+for x in freqItems:
+    if len(x)==max_len:
+        counttt+=1
+
+print("maximum size: ",max_len)
+print("number of maximal itemsets is : ",counttt)
+print("Number of freq patterns generated: ",len(freqItems))
+print("Total time taken : ", end_time - start_time)
